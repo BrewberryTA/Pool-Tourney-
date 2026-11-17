@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pool Tournament Bracket</title>
+<style>
+  :root{
+    --bg:#070b12; --panel:#0f1622; --line:#223047; --text:#e6ecf5; --muted:#8391a7;
+    --accent:#38bdf8; --gold:#fbbf24; --amber:#f59e0b; --danger:#f87171;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI",system-ui,-apple-system,Helvetica,Arial,sans-serif}
+  body{display:flex;flex-direction:column;overflow:hidden}
+
+  /* ---------- Organizer toolbar ---------- */
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .event-input{flex:1 1 260px;min-width:200px;background:transparent;border:1px solid transparent;
+    color:var(--text);font-size:18px;font-weight:700;padding:6px 8px;border-radius:6px;letter-spacing:.5px}
+  .event-input:hover,.event-input:focus{border-color:var(--line);outline:none;background:#0b111b}
+  .btn{background:#17223a;border:1px solid #2b3a57;color:var(--text);padding:8px 13px;border-radius:7px;
+    font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
+  .btn:hover{background:#1e2c49;border-color:#3a4d73}
+  .btn.primary{background:#0e4f74;border-color:#1b7fb5}
+  .btn.primary:hover{background:#12628f}
+  .btn.danger{color:var(--danger)}
+  .btn.danger.armed{background:#5b1a1a;border-color:var(--danger);color:#fff}
+  .btn:disabled{opacity:.4;cursor:default}
+  .sep{width:1px;height:26px;background:var(--line)}
+  .statusbar{display:flex;gap:14px;align-items:center;padding:6px 16px;font-size:13px;color:var(--muted);
+    background:#0b111b;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .statusbar b{color:var(--text)}
+
+  /* ---------- Board ---------- */
+  .board-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px}
+  svg#board{width:100%;height:100%;display:block}
+  .slot.clickable{cursor:pointer}
+  .slot.clickable:hover rect.box{stroke:#7dd3fc;stroke-width:2.5}
+  .ondeck rect.box{animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{stroke:#f59e0b;stroke-opacity:1}50%{stroke:#f59e0b;stroke-opacity:.25}}
+  .live-dot{animation:blink 1.4s ease-in-out infinite}
+  @keyframes blink{50%{opacity:.25}}
+
+  /* ---------- TV mode ---------- */
+  body.tv .toolbar, body.tv .statusbar{display:none}
+  body.tv .board-wrap{padding:0}
+  body.tv.idle{cursor:none}
+  .tv-exit{position:fixed;top:12px;right:12px;display:none;z-index:5;opacity:.0;transition:opacity .3s}
+  body.tv.preview .tv-exit{display:block}
+  body.tv:not(.idle) .tv-exit{opacity:1}
+  .tv-hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#000a;padding:8px 14px;
+    border-radius:8px;font-size:14px;color:var(--muted);display:none;transition:opacity .6s}
+  body.tv:not(.idle) .tv-hint{display:block}
+
+  /* Champion overlay (TV) */
+  .champ-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:radial-gradient(circle at center,#000c 0%,#000e 70%);z-index:10;flex-direction:column}
+  .champ-overlay.show{display:flex;animation:fadein .5s ease}
+  .champ-overlay .t{font-size:4vw;letter-spacing:.6vw;color:var(--gold);font-weight:800}
+  .champ-overlay .n{font-size:8vw;font-weight:900;color:#fff;text-shadow:0 0 40px #fbbf2499;
+    animation:pop .7s cubic-bezier(.2,1.6,.4,1)}
+  @keyframes fadein{from{opacity:0}}
+  @keyframes pop{from{transform:scale(.4);opacity:0}}
+
+  /* ---------- Players dialog ---------- */
+  .modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:20}
+  .modal.show{display:flex}
+  .dialog{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:min(560px,94vw);
+    max-height:92vh;display:flex;flex-direction:column;padding:18px;gap:12px}
+  .dialog h2{margin:0;font-size:20px}
+  .dialog p{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
+  .dialog textarea{flex:1;min-height:340px;background:#0b111b;color:var(--text);border:1px solid var(--line);
+    border-radius:8px;padding:10px;font-size:15px;line-height:1.5;resize:vertical;font-family:inherit}
+  .dialog .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .dialog .count{font-size:13px;color:var(--muted);margin-right:auto}
+  .dialog .count b{color:var(--text)}
+  .note{color:var(--amber)!important}
+
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(30px);opacity:0;
+    background:#111a29;border:1px solid var(--line);padding:10px 16px;border-radius:8px;font-size:14px;
+    transition:all .25s;z-index:30;max-width:90vw;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<!-- ================= ORGANIZER TOOLBAR ================= -->
+<div class="toolbar">
+  <input id="eventName" class="event-input" maxlength="60" title="Click to rename the event">
+  <button class="btn" id="btnPlayers">👥 Players</button>
+  <button class="btn" id="btnUndo" title="Undo last change (Ctrl+Z)">↶ Undo</button>
+  <button class="btn danger" id="btnReset">Reset results</button>
+  <span class="sep"></span>
+  <button class="btn primary" id="btnTV">📺 Open TV display</button>
+  <button class="btn" id="btnPreview">Preview TV</button>
+  <button class="btn" id="btnPNG">⬇ Download image</button>
+</div>
+<div class="statusbar">
+  <span class="chip"><span class="dot" style="background:var(--amber)"></span>On deck: <b id="stDeck">0</b></span>
+  <span class="chip">Matches left: <b id="stLeft">0</b></span>
+  <span class="chip">Players: <b id="stPlayers">0</b></span>
+  <span style="margin-left:auto">Click a player to advance them · click the winner again to undo</span>
+</div>
+
+<!-- ================= BRACKET (SVG, 1920x1080 = TV-shaped) ================= -->
+<div class="board-wrap"><svg id="board" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet"
+  xmlns="http://www.w3.org/2000/svg"></svg></div>
+
+<button class="btn tv-exit" id="btnExitTV">Exit TV preview (Esc)</button>
+<div class="tv-hint">Double-click for full screen</div>
+<div class="champ-overlay" id="champOverlay"><div class="t">🏆 CHAMPION 🏆</div><div class="n" id="champName"></div></div>
+
+<!-- ================= PLAYERS DIALOG ================= -->
+<div class="modal" id="playersModal">
+  <div class="dialog">
+    <h2>Players</h2>
+    <p>One name per line, up to 32. With fewer than 32, the empty spots become <b>BYEs</b>, spread out so
+       nobody plays a bye against a bye, and players who draw one advance automatically.</p>
+    <textarea id="playersText" spellcheck="false" placeholder="Mike T.&#10;Sarah K.&#10;..."></textarea>
+    <p id="shuffleNote" class="note" style="display:none">Random draw applied. Saving will clear all match results.</p>
+    <div class="row">
+      <span class="count" id="playersCount"></span>
+      <button class="btn" id="btnShuffle">🎲 Random draw</button>
+      <button class="btn" id="btnSample">Sample names</button>
+      <button class="btn" id="btnClear">Clear</button>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" id="btnCancel">Cancel</button>
+      <button class="btn primary" id="btnSave">Save players</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   DATA MODEL
+   players[32]  : names in bracket order ("" = BYE)
+   results[r][m]: winner of match m in round r -> 0 (top) | 1 (bottom) | null
+                  rounds: 0=R32 (16 matches) 1=Sweet16 (8) 2=Elite8 (4) 3=Final Four (2) 4=Final (1)
+   Everything else (who sits in each later box) is DERIVED from these two.
+   ===================================================================== */
+const KEY = 'pool-bracket-v1';
+const BYE = '\u0000BYE';
+const SAMPLE = ["Mike T.","Sarah K.","Big Dave","Luis R.","Jenna P.","Cody W.","Ray \"The Rack\" M.","Tina B.",
+  "Marcus J.","Kelsey D.","Hank O.","Priya S.","Tony G.","Shawn L.","Dee W.","Rob C.",
+  "Alexis F.","Carlos V.","Jimmy Two-Shot","Nina H.","Greg P.","Lauren A.","Eddie Z.","Mo K.",
+  "Becca L.","Duke R.","Vic N.","Sam Q.","Paulie E.","Andrea M.","Zeke B.","Trish Y."];
+
+function emptyResults(){ return [16,8,4,2,1].map(n => Array(n).fill(null)); }
+function defaultState(){
+  const s = { event:"Tuesday Night 8-Ball", players:SAMPLE.slice(), results:emptyResults() };
+  // demo progress so the mockup shows every state
+  [0,1,0,1,1,0,0,1,0,1,1,0].forEach((w,m)=>s.results[0][m]=w);
+  [1,0,0,1].forEach((w,m)=>s.results[1][m]=w);
+  s.results[2][0]=0;
+  return s;
+}
+
+let state = load() || defaultState();
+let history = [];
+const isTV = location.hash === '#tv';
+
+function load(){
+  try{ const raw = localStorage.getItem(KEY); if(!raw) return null;
+       const s = JSON.parse(raw); if(s && s.players && s.results) return s; }catch(e){}
+  return null;
+}
+function persist(){
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  try{ chan && chan.postMessage(state); }catch(e){}
+}
+function commit(mutator){
+  history.push(JSON.stringify(state)); if(history.length>100) history.shift();
+  mutator(); persist(); render();
+}
+
+/* ---- derive who occupies every box ---- */
+function derive(){
+  const slots = [state.players.map(n => (n||'').trim() ? n.trim() : BYE)];
+  for(let r=0;r<5;r++){
+    const next=[];
+    for(let m=0;m<slots[r].length/2;m++){
+      const w = winnerSide(r,m,slots[r][2*m],slots[r][2*m+1]);
+      next.push(w===null ? null : slots[r][2*m+w]);
+    }
+    slots.push(next);
+  }
+  return slots;
+}
+function winnerSide(r,m,a,b){
+  if(a===null||b===null) return null;
+  if(a===BYE&&b===BYE) return 0;   // empty pairing passes a BYE forward
+  if(a===BYE) return 1;
+  if(b===BYE) return 0;
+  return state.results[r][m];
+}
+const real = v => v!==null && v!==BYE;
+
+/* ---- organizer clicks a player ---- */
+function pick(r,i){
+  const slots=derive(), m=i>>1, side=i&1;
+  if(!(real(slots[r][2*m]) && real(slots[r][2*m+1]))) return;
+  commit(()=>{
+    state.results[r][m] = state.results[r][m]===side ? null : side;
+    let mm=m; for(let rr=r+1; rr<5; rr++){ mm>>=1; state.results[rr][mm]=null; } // clear anything downstream
+  });
+}
+
+/* =====================================================================
+   RENDER (pure SVG so the same drawing is the TV view AND the PNG export)
+   ===================================================================== */
+const svg = document.getElementById('board');
+const G = { bw:140, bh:38, step:160, top:162, pitch:56 };
+const colX = (side,r) => side===0 ? 30 + r*G.step : 1750 - r*G.step;   // r = 0..4
+const rowY = (r,k) => G.top + G.pitch*((k+0.5)*Math.pow(2,r));            // k = index within one half
+const C = { line:'#26344d', win:'#38bdf8', gold:'#fbbf24', amber:'#f59e0b' };
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function render(){
+  const slots = derive();
+  let out = `
+  <defs>
+    <radialGradient id="bgG" cx="50%" cy="45%" r="75%"><stop offset="0" stop-color="#132036"/><stop offset="1" stop-color="#05080e"/></radialGradient>
+    <linearGradient id="goldG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fde68a"/><stop offset="1" stop-color="#f59e0b"/></linearGradient>
+    <linearGradient id="winG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f3a5a"/><stop offset="1" stop-color="#0a2740"/></linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bgG)"/>`;
+
+  // ---- header ----
+  const left = countLeft(slots), deck = countDeck(slots), champ = slots[5][0];
+  const date = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+  out += `
+  <g transform="translate(960,0)">
+    <text x="0" y="66" text-anchor="middle" font-size="46" font-weight="800" letter-spacing="3" fill="#fff">${esc((state.event||'').toUpperCase())}</text>
+    <circle class="live-dot" cx="-150" cy="96" r="6" fill="${champ&&real(champ)?C.gold:'#ef4444'}"/>
+    <text x="-136" y="102" font-size="18" font-weight="700" letter-spacing="2" fill="${champ&&real(champ)?C.gold:'#ef4444'}">${champ&&real(champ)?'FINAL':'LIVE'}</text>
+    <text x="-60" y="102" font-size="18" fill="#8391a7" letter-spacing="1">${esc(date)}  ·  ${left} match${left===1?'':'es'} left</text>
+  </g>
+  ${eightBall(70,70)}${eightBall(1850,70)}`;
+
+  // ---- round labels ----
+  const L = ["ROUND OF 32","SWEET 16","ELITE 8","FINAL FOUR","FINALIST"];
+  for(let s=0;s<2;s++) for(let r=0;r<5;r++)
+    out += `<text x="${colX(s,r)+G.bw/2}" y="142" text-anchor="middle" font-size="14" font-weight="700" letter-spacing="2" fill="#5f7090">${L[r]}</text>`;
+
+  // ---- connectors (base, then highlighted winner paths on top) ----
+  let base='', hot='';
+  for(let r=0;r<5;r++){
+    const half = slots[r].length/2;                    // boxes per side in round r
+    for(let s=0;s<2;s++){
+      for(let k=0;k<half;k+=2){
+        if(r===4) break;
+        const gi = s*half+k, m = gi>>1;
+        const w = winnerSide(r,m,slots[r][gi],slots[r][gi+1]);
+        const y1=rowY(r,k), y2=rowY(r,k+1), ym=(y1+y2)/2;
+        const xe = s===0 ? colX(s,r)+G.bw : colX(s,r);
+        const dir = s===0 ? 1 : -1, xm = xe+10*dir, xn = xe+20*dir;
+        base += `M${xe} ${y1}H${xm}V${y2}H${xe}M${xm} ${ym}H${xn}`;
+        if(w!==null && real(slots[r+1][m])){
+          const yw = w===0?y1:y2;
+          hot += `M${xe} ${yw}H${xm}V${ym}H${xn}`;
+        }
+      }
+    }
+  }
+  // finalists -> champion
+  const yF = rowY(4,0);
+  base += `M${colX(0,4)+G.bw} ${yF}H840M1080 ${yF}H${colX(1,4)}`;
+  const fw = winnerSide(4,0,slots[4][0],slots[4][1]);
+  if(fw===0 && real(slots[5][0])) hot += `M${colX(0,4)+G.bw} ${yF}H840`;
+  if(fw===1 && real(slots[5][0])) hot += `M1080 ${yF}H${colX(1,4)}`;
+  out += `<path d="${base}" fill="none" stroke="${C.line}" stroke-width="2"/>`;
+  out += `<path d="${hot}" fill="none" stroke="${C.win}" stroke-width="3"/>`;
+
+  // ---- boxes ----
+  for(let r=0;r<5;r++){
+    const half = slots[r].length/2;
+    for(let gi=0; gi<slots[r].length; gi++){
+      const s = gi<half?0:1, k = gi - s*half, m = gi>>1;
+      const a = slots[r][2*m], b = slots[r][2*m+1];
+      const w = winnerSide(r,m,a,b);
+      const v = slots[r][gi];
+      let st = 'tbd';
+      if(v===BYE) st='bye';
+      else if(v!==null){
+        if(real(a)&&real(b)) st = w===null ? 'deck' : (w===(gi&1) ? 'win' : 'lose');
+        else st = 'wait';   // waiting for opponent (or advancing past a bye)
+        if(w!==null && w===(gi&1) && !(real(a)&&real(b))) st='wait';
+      }
+      out += box(r,gi,colX(s,r),rowY(r,k),v,st,s, !isTV && real(a)&&real(b));
+    }
+  }
+  // ---- champion ----
+  const cv = slots[5][0], cy = yF;
+  out += `<text x="960" y="${cy-62}" text-anchor="middle" font-size="22" font-weight="800" letter-spacing="5" fill="${C.gold}">🏆 CHAMPION</text>`;
+  if(real(cv)){
+    out += `<rect x="840" y="${cy-32}" width="240" height="64" rx="10" fill="url(#goldG)" stroke="#fff6" stroke-width="2"/>
+            <text class="fit" data-maxw="220" x="960" y="${cy+10}" text-anchor="middle" font-size="28" font-weight="900" fill="#1a1204">${esc(cv)}</text>`;
+  } else {
+    out += `<rect x="840" y="${cy-32}" width="240" height="64" rx="10" fill="#120f05" stroke="${C.gold}" stroke-width="2" stroke-dasharray="8 6"/>
+            <text x="960" y="${cy+9}" text-anchor="middle" font-size="26" font-weight="800" fill="#fbbf2455">?</text>`;
+  }
+  // ---- legend ----
+  out += `<g font-size="14" fill="#5f7090" letter-spacing="1">
+    <rect x="760" y="1046" width="14" height="14" rx="3" fill="none" stroke="${C.amber}" stroke-width="2"/><text x="782" y="1058">ON DECK</text>
+    <rect x="880" y="1046" width="14" height="14" rx="3" fill="url(#winG)" stroke="${C.win}" stroke-width="2"/><text x="902" y="1058">ADVANCED</text>
+    <rect x="1010" y="1046" width="14" height="14" rx="3" fill="#0d131d" stroke="#1b2537" stroke-width="2"/><text x="1032" y="1058">OUT / BYE</text></g>`;
+
+  svg.innerHTML = out;
+  fitText();
+  updateStatus(slots, left, deck);
+  maybeCelebrate(cv);
+}
+
+function box(r,gi,x,yc,v,st,side,clickable){
+  const y = yc - G.bh/2;
+  const S = {
+    tbd :{fill:'#0d1420',stroke:'#1b2638',text:'',             tf:'#3b4860',op:1},
+    bye :{fill:'#0b1019',stroke:'#172131',text:'BYE',          tf:'#3d4a60',op:1},
+    wait:{fill:'#152038',stroke:'#2c3b58',text:v,              tf:'#e6ecf5',op:1},
+    deck:{fill:'#1a2335',stroke:C.amber,  text:v,              tf:'#ffffff',op:1},
+    win :{fill:'url(#winG)',stroke:C.win, text:v,              tf:'#ffffff',op:1},
+    lose:{fill:'#0d131d',stroke:'#1b2537',text:v,              tf:'#6b778c',op:.55},
+  }[st];
+  const tx = side===0 ? x+12 : x+G.bw-12, anchor = side===0?'start':'end';
+  const label = st==='tbd' ? '' : (st==='bye'?'BYE':v);
+  return `<g class="slot ${clickable?'clickable':''} ${st==='deck'?'ondeck':''}" data-r="${r}" data-i="${gi}" opacity="${S.op}">
+    <rect class="box" x="${x}" y="${y}" width="${G.bw}" height="${G.bh}" rx="6" fill="${S.fill}" stroke="${S.stroke}" stroke-width="2"/>
+    ${label?`<text class="fit" data-maxw="${G.bw-22}" x="${tx}" y="${yc+6.5}" text-anchor="${anchor}" font-size="18"
+       font-weight="${st==='win'?800:600}" ${st==='bye'?'font-style="italic"':''} fill="${S.tf}">${esc(label)}</text>`:''}
+  </g>`;
+}
+function eightBall(cx,cy){
+  return `<g><circle cx="${cx}" cy="${cy}" r="30" fill="#0a0a0a" stroke="#2a3446" stroke-width="2"/>
+    <circle cx="${cx-6}" cy="${cy-7}" r="13" fill="#f8fafc"/>
+    <text x="${cx-6}" y="${cy-1}" text-anchor="middle" font-size="16" font-weight="900" fill="#0a0a0a">8</text></g>`;
+}
+function fitText(){
+  svg.querySelectorAll('text.fit').forEach(t=>{
+    const max=+t.dataset.maxw; let fs=+t.getAttribute('font-size');
+    try{
+      while(t.getComputedTextLength()>max && fs>12){ fs-=1; t.setAttribute('font-size',fs); }
+      if(t.getComputedTextLength()>max){ t.setAttribute('textLength',max); t.setAttribute('lengthAdjust','spacingAndGlyphs'); }
+    }catch(e){}
+  });
+}
+function countLeft(slots){ let n=0; for(let r=0;r<5;r++) for(let m=0;m<slots[r].length/2;m++){
+  const a=slots[r][2*m], b=slots[r][2*m+1]; if(winnerSide(r,m,a,b)===null) {
+    if(a===BYE||b===BYE) continue; n++; } } return n; }
+function countDeck(slots){ let n=0; for(let r=0;r<5;r++) for(let m=0;m<slots[r].length/2;m++){
+  const a=slots[r][2*m], b=slots[r][2*m+1]; if(real(a)&&real(b)&&state.results[r][m]===null) n++; } return n; }
+function updateStatus(slots,left,deck){
+  document.getElementById('stDeck').textContent=deck;
+  document.getElementById('stLeft').textContent=left;
+  document.getElementById('stPlayers').textContent=state.players.filter(p=>(p||'').trim()).length;
+  document.getElementById('btnUndo').disabled = !history.length;
+  const ev=document.getElementById('eventName'); if(document.activeElement!==ev) ev.value=state.event||'';
+}
+
+/* ---- champion celebration (TV only) ---- */
+let lastChamp = undefined;
+function maybeCelebrate(cv){
+  const name = real(cv)?cv:null;
+  if(lastChamp!==undefined && name && name!==lastChamp && document.body.classList.contains('tv')){
+    document.getElementById('champName').textContent=name;
+    const o=document.getElementById('champOverlay'); o.classList.add('show');
+    clearTimeout(maybeCelebrate.t); maybeCelebrate.t=setTimeout(()=>o.classList.remove('show'),15000);
+  }
+  lastChamp=name;
+}
+document.getElementById('champOverlay').onclick=e=>e.currentTarget.classList.remove('show');
+
+/* =====================================================================
+   PLAYERS DIALOG
+   ===================================================================== */
+const modal=document.getElementById('playersModal'), ta=document.getElementById('playersText');
+let resetOnSave=false;
+function openPlayers(){
+  ta.value = state.players.filter(p=>(p||'').trim()).join('\n');
+  resetOnSave=false; document.getElementById('shuffleNote').style.display='none';
+  updCount(); modal.classList.add('show'); ta.focus();
+}
+function lines(){ return ta.value.split('\n').map(s=>s.trim()).filter(Boolean); }
+function updCount(){
+  const n=lines().length, el=document.getElementById('playersCount');
+  el.innerHTML = n>32 ? `<b style="color:var(--danger)">${n}/32</b>: only the first 32 will be used`
+                      : `<b>${n}</b>/32 players${n<32?` · ${32-n} bye${32-n===1?'':'s'}`:''}`;
+}
+// Spread byes so they land in different parts of the bracket
+function layout(names){
+  names=names.slice(0,32); const byes=32-names.length;
+  const order=[0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15];
+  const one=new Set(order.slice(0,Math.min(byes,16))), two=new Set(order.slice(0,Math.max(0,byes-16)));
+  const out=[]; let i=0;
+  for(let m=0;m<16;m++){
+    if(two.has(m)) out.push('','');
+    else if(one.has(m)) out.push(names[i++],'');
+    else out.push(names[i++],names[i++]);
+  }
+  return out;
+}
+ta.addEventListener('input',updCount);
+document.getElementById('btnPlayers').onclick=openPlayers;
+document.getElementById('btnCancel').onclick=()=>modal.classList.remove('show');
+document.getElementById('btnSample').onclick=()=>{ ta.value=SAMPLE.join('\n'); updCount(); };
+document.getElementById('btnClear').onclick=()=>{ ta.value=''; updCount(); ta.focus(); };
+document.getElementById('btnShuffle').onclick=()=>{
+  const a=lines(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  ta.value=a.join('\n'); resetOnSave=true; document.getElementById('shuffleNote').style.display='block'; updCount();
+};
+document.getElementById('btnSave').onclick=()=>{
+  const next=layout(lines());
+  const changedOrder = next.some((p,i)=>!!p !== !!(state.players[i]||'').trim());   // bye positions moved
+  commit(()=>{ state.players=next; if(resetOnSave||changedOrder) state.results=emptyResults(); });
+  modal.classList.remove('show');
+  toast(resetOnSave||changedOrder ? 'Players saved, bracket reset' : 'Players saved, results kept');
+};
+
+/* =====================================================================
+   TOOLBAR
+   ===================================================================== */
+svg.addEventListener('click',e=>{
+  if(document.body.classList.contains('tv')) return;
+  const g=e.target.closest('g.slot.clickable'); if(g) pick(+g.dataset.r,+g.dataset.i);
+});
+document.getElementById('eventName').addEventListener('change',e=>commit(()=>state.event=e.target.value.trim()));
+document.getElementById('btnUndo').onclick=undo;
+function undo(){ if(!history.length) return; state=JSON.parse(history.pop()); persist(); render(); }
+const btnReset=document.getElementById('btnReset');
+btnReset.onclick=()=>{
+  if(!btnReset.classList.contains('armed')){
+    btnReset.classList.add('armed'); btnReset.textContent='Click again to confirm';
+    clearTimeout(btnReset.t); btnReset.t=setTimeout(()=>{btnReset.classList.remove('armed');btnReset.textContent='Reset results';},3000);
+    return;
+  }
+  btnReset.classList.remove('armed'); btnReset.textContent='Reset results';
+  commit(()=>state.results=emptyResults()); toast('All results cleared (Undo brings them back)');
+};
+document.getElementById('btnTV').onclick=()=>{
+  let w=null; try{ w=window.open(location.href.split('#')[0]+'#tv','bracketTV'); }catch(e){}
+  if(!w) toast('Pop-up blocked here. On your GitHub page this opens a window you drag to the TV. Use "Preview TV" to see it.');
+  else toast('TV window opened: drag it to the TV and double-click for full screen');
+};
+document.getElementById('btnPreview').onclick=()=>setTV(true,true);
+document.getElementById('btnExitTV').onclick=()=>setTV(false);
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape' && document.body.classList.contains('preview')) setTV(false);
+  if((e.ctrlKey||e.metaKey) && e.key==='z' && !modal.classList.contains('show') && document.activeElement.tagName!=='INPUT'){ e.preventDefault(); undo(); }
+});
+function setTV(on,preview){
+  document.body.classList.toggle('tv',on); document.body.classList.toggle('preview',!!preview); render();
+}
+document.addEventListener('dblclick',()=>{
+  if(!document.body.classList.contains('tv')) return;
+  try{ (document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()).catch(()=>{}); }catch(e){}
+});
+// hide cursor/hints on the TV after 3s idle
+let idleT; function wake(){ document.body.classList.remove('idle'); clearTimeout(idleT); idleT=setTimeout(()=>document.body.classList.add('idle'),3000); }
+document.addEventListener('mousemove',wake); wake();
+
+/* ---- PNG export: draws the SVG onto a canvas at 2x ---- */
+document.getElementById('btnPNG').onclick=()=>{
+  const clone=svg.cloneNode(true);
+  clone.setAttribute('width',1920); clone.setAttribute('height',1080);
+  clone.querySelectorAll('.ondeck rect.box').forEach(r=>r.setAttribute('stroke',C.amber));
+  const data='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(clone));
+  const img=new Image();
+  img.onload=()=>{
+    const c=document.createElement('canvas'); c.width=3840; c.height=2160;
+    const ctx=c.getContext('2d'); ctx.scale(2,2); ctx.drawImage(img,0,0);
+    c.toBlob(b=>{
+      try{
+        const a=document.createElement('a'); a.href=URL.createObjectURL(b);
+        a.download=(state.event||'bracket').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-')+'.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('Image downloaded (downloads are blocked in the Claude preview but work on GitHub Pages)');
+      }catch(e){ toast('Download blocked here. It works once hosted on GitHub Pages.'); }
+    });
+  };
+  img.src=data;
+};
+
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove('show'),3800); }
+
+/* =====================================================================
+   LIVE SYNC between the organizer window and the TV window
+   (same browser, same computer: no server needed)
+   ===================================================================== */
+let chan=null; try{ chan=new BroadcastChannel('pool-bracket'); chan.onmessage=e=>{ state=e.data; render(); }; }catch(e){}
+window.addEventListener('storage',e=>{ if(e.key===KEY && e.newValue){ try{ state=JSON.parse(e.newValue); render(); }catch(_){} } });
+
+if(isTV) document.body.classList.add('tv');
+render();
+</script>
+</body>
+</html>
